@@ -315,7 +315,7 @@ class OverlapPatchEmbed(nn.Module):
         super(OverlapPatchEmbed, self).__init__()
         self.embed_dim = embed_dim
         self.in_c = in_c
-        self.proj2 = nn.Conv2d(24, embed_dim, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.proj2 = nn.Conv2d(in_c*4, embed_dim, kernel_size=3, stride=1, padding=1, bias=bias)
         self.proj = nn.PixelUnshuffle(2)
 
     def forward(self, x):
@@ -353,6 +353,7 @@ class Upsample(nn.Module):
 class Swintormer(nn.Module):
     def __init__(self,
                  inp_channels=6,
+                 out_channels=3,
                  dim=48,
                  num_blocks=[2, 4, 6, 8],
                  num_refinement_blocks=4,
@@ -360,6 +361,7 @@ class Swintormer(nn.Module):
                  ffn_expansion_factor=2.66,
                  bias=False,
                  window_size=16,
+                 latent_window_size =8,
                  LayerNorm_type='WithBias',  ## Other option 'BiasFree'
                  ):
         super().__init__()
@@ -387,7 +389,7 @@ class Swintormer(nn.Module):
 
         self.latent = nn.Sequential(*[
             TransformerBlock(dim=int(dim * 2 ** 3), num_heads=heads[3], ffn_expansion_factor=ffn_expansion_factor,
-                             shift_size=0 if (i % 2 == 0) else window_size // 2, window_size=window_size,
+                             shift_size=0 if (i % 2 == 0) else window_size // 2, window_size=latent_window_size,
                              bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[3])])
 
         self.up4_3 = Upsample(int(dim * 2 ** 3))  ## From Level 4 to Level 3
@@ -419,7 +421,7 @@ class Swintormer(nn.Module):
         ###########################
         self.apply(self._init_weights)
         # self.output = nn.Conv2d(int(dim * 2 ** 1), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-        self.output = nn.Sequential(*[nn.Conv2d(int(dim * 2 ** 1), 12, kernel_size=3, stride=1, padding=1, bias=False),
+        self.output = nn.Sequential(*[nn.Conv2d(int(dim * 2 ** 1), out_channels*4, kernel_size=3, stride=1, padding=1, bias=False),
                                       nn.PixelShuffle(2)])
 
         self.refinement = checkpoint_wrapper(self.refinement)
@@ -460,6 +462,7 @@ class Swintormer(nn.Module):
 
         inp_enc_level4 = self.down3_4(out_enc_level3)
 
+
         latent = self.latent(inp_enc_level4)
 
         inp_dec_level3 = self.up4_3(latent)
@@ -477,7 +480,7 @@ class Swintormer(nn.Module):
         out_dec_level1 = self.decoder_level1(inp_dec_level1)
         out_dec_level1 = self.refinement(out_dec_level1)
         out_dec_level1 = out_dec_level1 + self.skip_conv(inp_enc_level1)
-        out_dec_level1 = self.output(out_dec_level1) + inp_img[:, :3, :, :]
+        out_dec_level1 = self.output(out_dec_level1) + inp_img[:, :27, :, :]
 
         out_dec_level1 = (out_dec_level1 + 1.) / 2.
         return out_dec_level1[:, :, :init_h, :init_w]

@@ -1,8 +1,11 @@
+import os
 import torch
 from collections import OrderedDict
 from os import path as osp
 from tqdm import tqdm
 import torch.nn.functional as F
+import matplotlib.image
+from PIL import Image
 
 from basicsr.archs import build_network
 from basicsr.losses import build_loss
@@ -208,35 +211,41 @@ class MYModel(BaseModel):
             pbar = tqdm(total=len(dataloader), unit='image')
 
         for idx, val_data in enumerate(dataloader):
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+            #img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
             self.feed_data(val_data)
             self.test()
 
             visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']])
-            metric_data['img'] = sr_img
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']])
-                metric_data['img2'] = gt_img
-                del self.gt
+            # sr_img = tensor2img([visuals['result']])
+            # metric_data['img'] = sr_img
+            # if 'gt' in visuals:
+            #     gt_img = tensor2img([visuals['gt']])
+            #     metric_data['img2'] = gt_img
+            #     del self.gt
 
             # tentative for out of GPU memory
             del self.lq
             del self.output
             torch.cuda.empty_cache()
 
-            if save_img:
-                if self.opt['is_train']:
-                    save_img_path = osp.join(self.opt['path']['visualization'], img_name,
-                                             f'{img_name}_{current_iter}.png')
-                else:
-                    if self.opt['val']['suffix']:
-                        save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                 f'{img_name}_{self.opt["val"]["suffix"]}.png')
-                    else:
-                        save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                 f'{img_name}_{self.opt["name"]}.png')
-                imwrite(sr_img, save_img_path)
+            out_imgs_dir = "/datasets/sai/swintormer/out_images"
+            focal_position = val_data['focal_position'][0].item()
+            index = val_data['index']
+            batch = val_data
+            #if save_img:
+            #save images
+            os.makedirs(os.path.join(out_imgs_dir, f"position_{focal_position}/images"), exist_ok=True)
+            video_frames_normalized = visuals['result']
+            #reshape to (9,3, height, width)
+            video_frames_normalized = video_frames_normalized.reshape(9, 3, video_frames_normalized.shape[2], video_frames_normalized.shape[3])
+            #clip to [0, 1]
+            video_frames_normalized = torch.clamp(video_frames_normalized, 0, 1)
+            #convert to numpy
+
+            #save each frame
+            for i in range(9):
+                matplotlib.image.imsave(os.path.join(out_imgs_dir, f"position_{focal_position}/images/img_{index[0].item()}_frame_{i}.png"), video_frames_normalized[i].permute(1,2,0).cpu().numpy())
+        
 
             if with_metrics:
                 # calculate metrics
@@ -249,7 +258,7 @@ class MYModel(BaseModel):
                     #     self.flag += 1
             if use_pbar:
                 pbar.update(1)
-                pbar.set_description(f'Test {img_name}')
+                pbar.set_description(f'Test {index[0].item()}')
         if use_pbar:
             pbar.close()
 
